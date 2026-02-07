@@ -1,0 +1,13 @@
+# Class Names Configuration for AI Detection System
+# Format: YOLO_CLASS_NAME|MAPPED_CLASS_NAME|RGB_COLOR_R|RGB_COLOR_G|RGB_COLOR_B
+
+Backlit Not Functional|backlit_not_functional|255|0|0
+Backlit Functional|backlit_functional|0|255|0
+BWU Damage|sheet_damaged|255|165|0
+Compartment|compartment|0|0|255
+CAN Compartment Damage|compartment_damage|255|0|255
+Paint Fade Off|paint_fade_off|255|255|0
+Visibility Hidden With Others Items|Visibility_hidden_other_items|128|0|128
+ZYN Logo Damage|logo_damage|255|20|147
+Asset Available Not Deployed|non_compliant|0|255|255
+   

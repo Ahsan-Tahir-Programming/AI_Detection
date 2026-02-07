@@ -1,0 +1,54 @@
+# PyCharm
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+.env/
+.env.*
+.venv.bak/
+.change/
+
+# Ignore downloaded/processed images
+app/download/
+
+# Logs and reports
+logs/
+*.log
+*.pid
+*.sock
+.coverage
+.cache
+pytestdebug.log
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+MANIFEST
+
+# Frontend
+frontend/node_modules/
+frontend/.env.local
+frontend/dist/
+frontend/build/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# Docker (if applicable)
+*.env
+docker-compose.override.yml
