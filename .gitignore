@@ -15,6 +15,17 @@ venv/
 .venv.bak/
 .change/
 
+# Ignore all models
+app/models/*.pt
+
+# But allow zyn.pt
+!app/models/zyn.pt
+
+# Ignore environment and node modules
+.change/
+node_modules/
+__pycache__/
+
 # Ignore downloaded/processed images
 app/download/
 
