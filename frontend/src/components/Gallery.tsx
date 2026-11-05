@@ -1,16 +1,10 @@
-interface GalleryItem {
-  requestId: string
-  processedImageUrl: string
-  originalImageUrl: string
-  project?: string
-  routeId?: string
-  imageKey?: string
-  visitDate?: string
-}
+import { useState } from 'react'
+import type { GalleryItem } from '../types'
+import { getDownloadUrl } from '../api/client'
 
 interface GalleryProps {
   items: GalleryItem[]
-  onRemove: (requestId: string) => void
+  onRemove: (requestId: string) => Promise<void>
   page?: number
   total?: number
   pageSize?: number
@@ -25,98 +19,147 @@ export default function Gallery({
   pageSize = 12,
   onPageChange,
 }: GalleryProps) {
-  if (!items.length) return null
+  const [searchTerm, setSearchTerm] = useState('')
+
+  if (!items.length) {
+    return (
+      <div className="gallery-empty">
+        <span className="empty-icon">🗄️</span>
+        <h4>No Historical Audit Records Found</h4>
+        <p>Run your first YOLO inference in the Detection Studio to generate and persist annotated images.</p>
+      </div>
+    )
+  }
+
+  const filteredItems = items.filter((item) => {
+    if (!searchTerm.trim()) return true
+    const term = searchTerm.toLowerCase()
+    return (
+      (item.routeId && item.routeId.toLowerCase().includes(term)) ||
+      (item.project && item.project.toLowerCase().includes(term)) ||
+      (item.visitDate && item.visitDate.toLowerCase().includes(term))
+    )
+  })
 
   const totalPages = Math.max(1, Math.ceil((total || items.length) / pageSize))
 
-  // API base URL - uses environment variable or falls back to localhost
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
-  const handleViewImage = (imageUrl: string) => {
-    window.open(imageUrl, '_blank')
-  }
-
   const handleDownloadImage = (imageUrl: string) => {
-    // Extract filename from URL
-    const url = new URL(imageUrl)
-    const filename = url.pathname.split('/').pop()
-    
-    if (!filename) {
-      alert('Failed to extract filename')
-      return
-    }
+    const filename = imageUrl.split('?')[0].split('/').pop() || 'processed.jpg'
+    const downloadUrl = getDownloadUrl(filename)
 
-    // Call the download endpoint with proper Content-Disposition header
-    const downloadUrl = `${API_URL}/download-image/${filename}`
-    
     const link = document.createElement('a')
     link.href = downloadUrl
     link.download = filename
-    
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
   }
 
+  const handleRemoveConfirm = (requestId: string) => {
+    if (window.confirm('Are you sure you want to delete this detection record and its processed image?')) {
+      onRemove(requestId)
+    }
+  }
+
   return (
     <div className="gallery">
-      <h3 style={{ color: '#fff' }}>Saved Detections</h3>
+      <div className="gallery-header-row">
+        <div>
+          <h3>Audit Records & Annotated Image Gallery</h3>
+          <p className="section-note">
+            Persisted YOLO detections with annotated bounding boxes and metadata ({total} total runs)
+          </p>
+        </div>
+
+        <div className="gallery-filter-wrap">
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Filter by Route, Project, or Date..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+      </div>
 
       <div className="gallery-grid">
-        {items.map((it) => (
-          <div key={it.requestId} className="gallery-card">
+        {filteredItems.map((item) => (
+          <div key={item.requestId} className="gallery-card">
             <div className="img-wrap">
-              <img src={it.processedImageUrl} alt={it.requestId} />
+              <img
+                src={item.processedImageUrl}
+                alt={`Processed result for ${item.routeId || item.requestId}`}
+                loading="lazy"
+              />
             </div>
             <div className="meta">
-              <div>
-                <strong>Route:</strong> {it.routeId}
+              <div className="meta-row">
+                <strong>Route:</strong> <span>{item.routeId || 'N/A'}</span>
               </div>
-              <div>
-                <strong>Project:</strong> {it.project}
+              <div className="meta-row">
+                <strong>Profile:</strong> <span className="uppercase-tag">{item.project || 'N/A'}</span>
               </div>
-              <div>
-                <strong>Date:</strong> {it.visitDate}
+              <div className="meta-row">
+                <strong>Date:</strong> <span>{item.visitDate || 'N/A'}</span>
               </div>
+              {item.detections && (
+                <div className="meta-row">
+                  <strong>Objects:</strong>
+                  <span className="objects-badge">{item.detections.length} Detected</span>
+                </div>
+              )}
             </div>
             <div className="actions">
-              <button className="btn small" onClick={() => handleViewImage(it.processedImageUrl)}>
+              <a
+                href={item.processedImageUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn small"
+              >
                 View
-              </button>
-              <button 
-                className="btn small" 
-                onClick={() => handleDownloadImage(it.processedImageUrl)}
+              </a>
+              <button
+                type="button"
+                className="btn small secondary"
+                onClick={() => handleDownloadImage(item.processedImageUrl)}
               >
                 Download
               </button>
-              <button className="btn small danger" onClick={() => onRemove(it.requestId)}>
-                Remove
+              <button
+                type="button"
+                className="btn small danger"
+                onClick={() => handleRemoveConfirm(item.requestId)}
+              >
+                Delete
               </button>
             </div>
           </div>
         ))}
       </div>
 
-      <div
-        className="pagination"
-        style={{ marginTop: 12, display: 'flex', justifyContent: 'center', gap: 8 }}
-      >
-        <button
-          className="btn small"
-          onClick={() => onPageChange && onPageChange(Math.max(1, page - 1))}
-        >
-          Prev
-        </button>
-        <div style={{ padding: '0.4rem 0.8rem', background: '#fff', borderRadius: 6, color: '#1a1a1a', fontWeight: 'bold' }}>
-          Page {page} / {totalPages}
+      {totalPages > 1 && (
+        <div className="pagination">
+          <button
+            type="button"
+            className="btn small pagination-btn"
+            disabled={page <= 1}
+            onClick={() => onPageChange && onPageChange(page - 1)}
+          >
+            ← Previous
+          </button>
+          <div className="pagination-info">
+            Page {page} of {totalPages}
+          </div>
+          <button
+            type="button"
+            className="btn small pagination-btn"
+            disabled={page >= totalPages}
+            onClick={() => onPageChange && onPageChange(page + 1)}
+          >
+            Next →
+          </button>
         </div>
-        <button
-          className="btn small"
-          onClick={() => onPageChange && onPageChange(Math.min(totalPages, page + 1))}
-        >
-          Next
-        </button>
-      </div>
+      )}
     </div>
   )
 }

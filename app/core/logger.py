@@ -1,33 +1,29 @@
+"""Logging setup with rotating file handler and console output."""
 import logging
-from logging.handlers import RotatingFileHandler
 import os
-
-# Environment-aware log directory (same pattern as main.py)
-if os.getenv("DOCKER_ENV"):
-    LOG_DIR = "/app/logs"  # Docker volume path
-else:
-    LOG_DIR = "logs" # Local path
-
-# Ensure logs folder exists
-os.makedirs(LOG_DIR, exist_ok=True)
+from logging.handlers import RotatingFileHandler
+from app.core.config import LOG_DIR
 
 # Create logger
 logger = logging.getLogger("fastapi_app")
 logger.setLevel(logging.INFO)
 
-# File handler with rotation (e.g., max 5MB per file, keep 3 backups)
-file_handler = RotatingFileHandler(
-    os.path.join(LOG_DIR, "app.log"), # Use os.path.join for proper path
-    maxBytes=10*1024*1024,
-    backupCount=5
-)
-formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] - %(message)s")
-file_handler.setFormatter(formatter)
+# Only add handlers if none exist yet to avoid duplicate logs during reload
+if not logger.handlers:
+    formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] - %(message)s")
 
-# Console handler (for local/debug)
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
+    # File handler with rotation (10MB per file, keep 5 backups)
+    log_file_path = os.path.join(LOG_DIR, "app.log")
+    file_handler = RotatingFileHandler(
+        log_file_path,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8"
+    )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
-# Add handlers to logger
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)

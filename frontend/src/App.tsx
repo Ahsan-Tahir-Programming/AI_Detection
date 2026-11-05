@@ -1,182 +1,228 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import './App.css'
+import Sidebar from './components/Sidebar'
+import Navbar from './components/Navbar'
 import DetectionForm from './components/DetectionForm'
 import ResultsDisplay from './components/ResultsDisplay'
 import Gallery from './components/Gallery'
-
-interface DetectionFormData {
-  modelname: string
-  project: string
-  imageKey: string
-  imageUrl: string
-  categoryName: string
-  routeId: string
-  visitDate: string
-}
-
-interface DetectionResult {
-  success: boolean
-  data?: {
-    id?: number
-    requestId?: string
-    project?: string
-    routeId?: string
-    imageKey?: string[]
-    imageSize?: number[]
-    visitDate?: string
-    detectedSKU?: Record<string, any>
-    originalImageUrl?: string
-    processedImageUrl?: string
-    detections?: any[]
-    createdAt?: string
-  }
-  error?: string
-}
+import AnalyticsView from './components/AnalyticsView'
+import ModelRegistryView from './components/ModelRegistryView'
+import ApiDocsView from './components/ApiDocsView'
+import type {
+  DetectionFormData,
+  DetectionResult,
+  GalleryItem,
+  ActiveTab,
+  ModelDetail,
+} from './types'
+import {
+  detectViaUrl,
+  detectViaUpload,
+  fetchDetections,
+  deleteDetection,
+  fetchModels,
+} from './api/client'
 
 function App() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('studio')
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark')
+
   const [results, setResults] = useState<DetectionResult | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Server-backed gallery (pagination)
-  const [gallery, setGallery] = useState<any[]>([])
-  const [page, setPage] = useState(1)
-  const [pageSize] = useState(12)
-  const [total, setTotal] = useState(0)
+  // Discovered backend models
+  const [availableModels, setAvailableModels] = useState<string[]>(['zyn'])
+  const [modelsDetails, setModelsDetails] = useState<ModelDetail[]>([])
+  const [selectedModel, setSelectedModel] = useState<string>('zyn')
 
-  const fetchGallery = async (pageToLoad = 1) => {
-    try {
-      const res = await fetch(
-        `http://localhost:8000/detections/?page=${pageToLoad}&page_size=${pageSize}`
-      )
-      const payload = await res.json()
-      if (res.ok && payload.success) {
-        setGallery(payload.data.items)
-        setTotal(payload.data.total)
-        setPage(pageToLoad)
+  // Server-backed gallery state
+  const [gallery, setGallery] = useState<GalleryItem[]>([])
+  const [page, setPage] = useState<number>(1)
+  const [pageSize] = useState<number>(12)
+  const [total, setTotal] = useState<number>(0)
+
+  // Load models on mount
+  useEffect(() => {
+    let isMounted = true
+    async function loadModels() {
+      try {
+        const res = await fetchModels()
+        if (isMounted) {
+          if (res.models && res.models.length > 0) {
+            setAvailableModels(res.models)
+            setSelectedModel(res.models[0])
+          }
+          if (res.details) {
+            setModelsDetails(res.details)
+          }
+        }
+      } catch (err) {
+        console.warn('Could not query /models endpoint, defaulting to ["zyn"]', err)
       }
-    } catch (e) {
-      console.error('Failed to fetch gallery', e)
     }
-  }
+    loadModels()
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  // Memoized fetchGallery
+  const fetchGallery = useCallback(
+    async (pageToLoad: number = 1) => {
+      try {
+        const payload = await fetchDetections(pageToLoad, pageSize)
+        if (payload.success) {
+          setGallery(payload.data.items)
+          setTotal(payload.data.total)
+          setPage(pageToLoad)
+        }
+      } catch (e) {
+        console.error('Failed to fetch gallery records:', e)
+      }
+    },
+    [pageSize]
+  )
+
+  useEffect(() => {
+    fetchGallery(1)
+  }, [fetchGallery])
 
   const handleRemoveFromGallery = async (requestId: string) => {
     try {
-      const res = await fetch(`http://localhost:8000/detections/${requestId}`, { method: 'DELETE' })
-      if (res.ok) {
-        // refresh current page
-        fetchGallery(page)
-      }
+      await deleteDetection(requestId)
+      await fetchGallery(page)
     } catch (e) {
-      console.error('Failed to delete', e)
+      console.error('Failed to delete detection record:', e)
+      alert('Failed to delete record. Please try again.')
     }
   }
-
-  // fetch initial gallery
-  useEffect(() => {
-    fetchGallery(1)
-  }, [])
 
   const handleDetection = async (formData: DetectionFormData) => {
     setLoading(true)
     setError(null)
     setResults(null)
+
     try {
-      const response = await fetch('http://localhost:8000/detect/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok || data.success === false) {
-        // Backend returned an error
-        const errMsg = data?.error || data?.detail || 'Detection failed'
-        setError(errMsg)
-        setResults(null)
-        return
+      let data
+      if (formData.imageFile) {
+        data = await detectViaUpload(formData.imageFile, formData)
+      } else {
+        data = await detectViaUrl(formData)
       }
 
-      // Success
-      setResults({success: true, data})
-
-      // Refresh server-backed gallery
+      setResults({ success: true, data })
       await fetchGallery(1)
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An error occurred'
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred during inference'
       setError(errorMessage)
-      setResults(null)
+      setResults({ success: false, error: errorMessage })
     } finally {
       setLoading(false)
     }
   }
 
-  // Theme (light/dark) — default to light when not explicitly set
+  // Theme synchronization
   useEffect(() => {
-    const saved = localStorage.getItem('theme')
-    if (saved === 'dark') {
+    const saved = localStorage.getItem('theme') as 'light' | 'dark' | null
+    const initialTheme = saved || 'dark'
+    setTheme(initialTheme)
+    if (initialTheme === 'dark') {
       document.documentElement.classList.add('theme-dark')
     } else {
       document.documentElement.classList.remove('theme-dark')
     }
-    console.log('App mounted — theme:', saved)
   }, [])
 
   const toggleTheme = () => {
-    const isDark = document.documentElement.classList.toggle('theme-dark')
-    localStorage.setItem('theme', isDark ? 'dark' : 'light')
+    const newTheme = theme === 'dark' ? 'light' : 'dark'
+    setTheme(newTheme)
+    localStorage.setItem('theme', newTheme)
+    if (newTheme === 'dark') {
+      document.documentElement.classList.add('theme-dark')
+    } else {
+      document.documentElement.classList.remove('theme-dark')
+    }
   }
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <div className="header-brand">
-          <div className="logo-sm">🤖</div>
-          <div>
-            <h1>AI Detection System</h1>
-            <p>Real-time object detection using YOLO models</p>
-          </div>
-        </div>
-        <div style={{ position: 'absolute', right: 20, top: 18 }}>
-          <button className="btn small" onClick={toggleTheme}>
-            Toggle Theme
-          </button>
-        </div>
-      </header>
+    <div className="app-shell">
+      {/* Left Collapsible Navigation Sidebar */}
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab)
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        totalHistory={total}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
 
-      <main className="app-main">
-        <div className="container">
-          <DetectionForm onSubmit={handleDetection} loading={loading} />
+      {/* Main Workspace Area */}
+      <div className="main-viewport">
+        <Navbar
+          activeTab={activeTab}
+          activeModel={selectedModel}
+          totalDetections={total}
+        />
 
-          {error && (
-            <div className="error-banner">
-              <p>❌ Error: {error}</p>
+        <main className="page-content">
+          {activeTab === 'studio' && (
+            <div className="studio-layout">
+              <DetectionForm
+                onSubmit={handleDetection}
+                loading={loading}
+                availableModels={availableModels}
+              />
+
+              {error && (
+                <div className="error-banner">
+                  <p>❌ <strong>Inference Error:</strong> {error}</p>
+                </div>
+              )}
+
+              {loading && (
+                <div className="loading">
+                  <div className="spinner"></div>
+                  <p>Running YOLO inference and generating bounding boxes...</p>
+                </div>
+              )}
+
+              {results && <ResultsDisplay result={results} />}
             </div>
           )}
 
-          {results && <ResultsDisplay result={results} />}
+          {activeTab === 'analytics' && <AnalyticsView />}
 
-          {loading && (
-            <div className="loading">
-              <div className="spinner"></div>
-              <p>Processing detection...</p>
-            </div>
+          {activeTab === 'history' && (
+            <Gallery
+              items={gallery}
+              onRemove={handleRemoveFromGallery}
+              page={page}
+              total={total}
+              pageSize={pageSize}
+              onPageChange={(p) => fetchGallery(p)}
+            />
           )}
 
-          {/* Saved gallery */}
-          <Gallery
-            items={gallery}
-            onRemove={handleRemoveFromGallery}
-            page={page}
-            total={total}
-            pageSize={pageSize}
-            onPageChange={(p) => fetchGallery(p)}
-          />
-        </div>
-      </main>
+          {activeTab === 'models' && (
+            <ModelRegistryView
+              modelsDetails={modelsDetails}
+              activeModel={selectedModel}
+              onSelectModel={(name) => {
+                setSelectedModel(name)
+                setActiveTab('studio')
+              }}
+            />
+          )}
+
+          {activeTab === 'api' && <ApiDocsView />}
+        </main>
+      </div>
     </div>
   )
 }
